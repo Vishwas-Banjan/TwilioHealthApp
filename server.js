@@ -14,7 +14,7 @@ const client = require("twilio")(
   process.env.TWILIO_AUTH_TOKEN
 );
 const symptomsArray = [
-    "None",
+  "None",
   "Headache",
   "Dizziness",
   "Nausea",
@@ -43,39 +43,38 @@ const sendResponseMessage = (msg, res) => {
   res.end(twiml.toString());
 };
 
-const giveSymptom = (message, leftOptions=[]) => {
-    
-    for (let index = 0; index < leftOptions.length; index++) {
-        if (index == message) {
-            return leftOptions[index];   
-        }
+const giveSymptom = (message, leftOptions = []) => {
+  for (let index = 0; index < leftOptions.length; index++) {
+    if (index == message) {
+      return leftOptions[index];
     }
+  }
 
-    return null;
+  return null;
 
-//     let thisMessage = "";
-//     switch (message) {
-//         case 0:
-//         thisMessage = "None";
-//         break;
-//         case 1:
-//         thisMessage = "Headache";
-//         break;
-//         case 2:
-//         thisMessage = "Dizziness";
-// break;
-//         case 3:
-//         thisMessage = "Nausea";
-// break;
-//         case 4:
-//         thisMessage = "Fatigue";
-// break;
-//         case 5:
-//         thisMessage = "Sadness";
-// break;
-//         default:
-//         return null;
-//     }
+  //     let thisMessage = "";
+  //     switch (message) {
+  //         case 0:
+  //         thisMessage = "None";
+  //         break;
+  //         case 1:
+  //         thisMessage = "Headache";
+  //         break;
+  //         case 2:
+  //         thisMessage = "Dizziness";
+  // break;
+  //         case 3:
+  //         thisMessage = "Nausea";
+  // break;
+  //         case 4:
+  //         thisMessage = "Fatigue";
+  // break;
+  //         case 5:
+  //         thisMessage = "Sadness";
+  // break;
+  //         default:
+  //         return null;
+  //     }
 };
 
 const giveSeverity = (severity, symptom) => {
@@ -114,6 +113,7 @@ const generateFirstMessage = (leftOptions = []) => {
 const newUserHandle = (message, userId, userDoc, res) => {
   //Create Account
   console.log("Account does not exist");
+  console.log(client);
   client.messages
     .create({
       body: "Welcome to the Study",
@@ -121,11 +121,12 @@ const newUserHandle = (message, userId, userDoc, res) => {
       to: userId
     })
     .then(result => {
+      console.log(result);
       console.log("sent welcome message");
 
       var newUser = new User({
         userId: userId,
-        symptom: "",
+        symptom: null,
         left: symptomsArray
       });
       newUser.save().then(result => {
@@ -134,8 +135,12 @@ const newUserHandle = (message, userId, userDoc, res) => {
 
         if (message != "START") {
           sendResponseMessage("Please say 'START' to start the server.", res);
+          
         } else {
-          processTheGivenMessage(message, userDoc, res, userId);
+          userDoc.symptom = "";
+          userDoc.save(()=>{
+            processTheGivenMessage(message, userDoc, res, userId);
+          });
         }
       });
     });
@@ -154,7 +159,10 @@ const processTheGivenMessage = (message, userDoc, res, userId) => {
   if (message == "START") {
     //Account Exists
     console.log("Account exists!");
-    sendResponseMessage(generateFirstMessage(userDoc.left), res);
+    userDoc.symptom = "";
+          userDoc.save(()=>{
+            sendResponseMessage(generateFirstMessage(userDoc.left), res);
+          });
   } else {
     let symptopServer = userDoc.symptom;
 
@@ -166,14 +174,20 @@ const processTheGivenMessage = (message, userDoc, res, userId) => {
       symptopServer == undefined
     ) {
 
-        if (message==0) {
-            sendResponseMessage("Thank you and we will check with you later.", res);
-            return;
-        }
-        // TODO: MAKE CHANGE IN LOGIC
-      let symptopInput = giveSymptom(message, userDoc.left, symptomsArray);
-      console.log(symptopInput+": symptopInput");
+      console.log(userDoc.left.length);
       
+      if (symptopServer == null&&userDoc.left.length>=6) {
+        sendResponseMessage("Please say 'START' to start the server.", res);
+        return;
+      }
+      if (message == 0) {
+        sendResponseMessage("Thank you and we will check with you later.", res);
+        return;
+      }
+      // TODO: MAKE CHANGE IN LOGIC
+      let symptopInput = giveSymptom(message, userDoc.left, symptomsArray);
+      console.log(symptopInput + ": symptopInput");
+
       if (symptopInput == null) {
         // invalid input by user
         sendResponseMessage(generateFirstMessage(userDoc.left), res);
@@ -184,7 +198,7 @@ const processTheGivenMessage = (message, userDoc, res, userId) => {
         }
 
         console.log(userDoc.left);
-        
+
         // TODO: pop the current element from array
         userDoc.left.pull(symptopInput);
 
@@ -211,32 +225,50 @@ const processTheGivenMessage = (message, userDoc, res, userId) => {
             console.log(symptopServer);
             let secondResponse = giveSeverity(message, symptopServer);
             if (secondResponse == null) {
-              sendResponseMessage("Again " + generateFirstMessage(userDoc.left), res);
+              sendResponseMessage(
+                "Again " + generateFirstMessage(userDoc.left),
+                res
+              );
             } else {
-              sendResponseMessage(secondResponse, res);
-              if (userDoc.left.length<3) {
-                  // do not repeat the process
-                  // TODO: need to send two response
-                  userDoc.left.set(symptomsArray);
-                  console.log(userDoc.left);
-                  userDoc.symptom = "";
-                  userDoc.save((err, results) => {
-                    if (err != null) {
-                      handleNotFoundErr(res, err);
-                    }
-                    sendResponseMessage("Thank you and see you soon", res);
-                    return;
-                  });
-              }else{
-                client.messages
+              client.messages
                 .create({
-                  body: generateFirstMessage(userDoc.left),
+                  body: secondResponse,
                   from: process.env.TWILIO_PHONE_NO,
                   to: userId
                 })
-                .then(message => console.log(message.sid));
-              // and repeat the 1st step
-              }
+                .then(() => {
+                  if (userDoc.left.length <= 3) {
+                    // do not repeat the process
+                    // TODO: need to send two response
+                    userDoc.remove();
+                    sendResponseMessage("Thank you and see you soon", res);
+
+                    // User.remove({userId: userId})
+                    // sendResponseMessage("Thank you and see you soon", res);
+                    // return;
+                    // userDoc.left.set(symptomsArray);
+                    // console.log(userDoc.left);
+                    // userDoc.symptom = "";
+                    // userDoc.save((err, results) => {
+                    //   if (err != null) {
+                    //     handleNotFoundErr(res, err);
+                    //   }
+                    //   sendResponseMessage("Thank you and see you soon", res);
+                    //   User.remove({userId: userId});
+                    //   return;
+                    // });
+                  } else {
+                    client.messages
+                      .create({
+                        body: generateFirstMessage(userDoc.left),
+                        from: process.env.TWILIO_PHONE_NO,
+                        to: userId
+                      })
+                      .then(message => console.log(message.sid));
+                    // and repeat the 1st step
+                  }
+                });
+              // sendResponseMessage(secondResponse, res);
             }
           })
           .catch(err => {
@@ -284,6 +316,6 @@ app.get("/", (req, res) => {
   // res.json({'cool':'stuff'})
 });
 
-http.createServer(app).listen(8080, () => {
+http.createServer(app).listen(3000, () => {
   console.log("Express server listening on port 3000");
 });
